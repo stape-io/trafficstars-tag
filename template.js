@@ -6,20 +6,20 @@ const getRequestHeader = require('getRequestHeader');
 const getTimestampMillis = require('getTimestampMillis');
 const JSON = require('JSON');
 const logToConsole = require('logToConsole');
-const makeString = require('makeString');
 const makeInteger = require('makeInteger');
-const setCookie = require('setCookie');
+const makeString = require('makeString');
 const parseUrl = require('parseUrl');
 const sendHttpRequest = require('sendHttpRequest');
+const setCookie = require('setCookie');
 
 /*==============================================================================
 ==============================================================================*/
 
 const eventData = getAllEventData();
 
-if(checkGuardClauses(data,eventData)) return;
+if (checkGuardClauses(data, eventData)) return;
 
-if(data.type === 'pageview') return storeClickId(data.clickIdKey);
+if (data.type === 'pageview') return storeClickId(data.clickIdKey);
 
 sendConversion(data);
 
@@ -32,59 +32,71 @@ if (data.useOptimisticScenario) {
 ==============================================================================*/
 
 function sendConversion(data) {
-  const goal = data.conversionId;
-  const clickId = data.clickId;
-  let baseUrl = 'https://https://tsyndicate.com/api/v1/cpa/action';
+  let baseUrl = '';
   const requestOptions = {
-    method: "GET"
+    method: ''
   };
-  
+
   log({
-    Name: 'Trafficstars',
+    Name: '',
     Type: 'Request',
     EventName: 'Conversion',
     RequestMethod: requestOptions.method,
     RequestUrl: requestUrl,
     RequestBody: ''
   });
-  
+
   return sendHttpRequest(requestUrl, requestOptions)
-  .then(response => {
-       log({
-        Name: 'Trafficstars',
+    .then((response) => {
+      log({
+        Name: '',
         Type: 'Response',
         EventName: 'Conversion',
         ResponseStatusCode: response.statusCode,
         ResponseHeaders: response.headers,
         ResponseBody: response.body
-      });  
-    
-    if(response.statusCode !== 200) {
-      return data.gtmOnFailure();
-    }
-    else {
-      return data.gtmOnSuccess();
-    }
-  })
-  .catch(error => {
-       log({
-        Name: 'Trafficstars',
+      });
+      if (!data.useOptimisticScenario) {
+        if (response.statusCode !== 200) {
+          return data.gtmOnFailure();
+        } else {
+          return data.gtmOnSuccess();
+        }
+      }
+    })
+    .catch((error) => {
+      log({
+        Name: '',
         Type: 'Message',
         EventName: 'Conversion',
         Message: 'API call failed or timed out',
         Reason: error
       });
-    return data.gtmOnFailure();
-  });
+      return data.gtmOnFailure();
+    });
 }
 
-function storeClickId(key){  
+function parseClickIdFromUrl(eventData) {
   const url = eventData.page_location || getRequestHeader('referer');
+  if (!url) return;
+
   const urlSearchParams = parseUrl(url).searchParams;
-  const clickId = urlSearchParams[data.clickIdKey];
- 
+  return urlSearchParams[data.clickIdParameterName];
+}
+
+function getClickId(data, eventData) {
+  const clickId = data.hasOwnProperty('clickId')
+    ? data.clickId
+    : parseClickIdFromUrl(eventData) || getCookieValues('_exoclick_cid')[0];
+
+  return clickId;
+}
+
+function storeClickId(key) {
+  const url = eventData.page_location || getRequestHeader('referer');
   if (!url) return data.gtmOnSuccess();
 
+  const clickId = getClickId(data, eventData);
   const cookieOptions = {
     domain: data.cookieDomain || 'auto',
     samesite: 'Lax',
@@ -96,14 +108,14 @@ function storeClickId(key){
 
   if (clickId) setCookie(data.clickIdKey, clickId, cookieOptions, false);
 
-  return data.gtmOnSuccess();  
+  return data.gtmOnSuccess();
 }
 
 /*==============================================================================
   Helpers
 ==============================================================================*/
 
-function checkGuardClauses(data,eventData) {
+function checkGuardClauses(data, eventData) {
   const url = eventData.page_location || getRequestHeader('referer');
 
   if (!isConsentGivenOrNotRequired(data, eventData)) {
