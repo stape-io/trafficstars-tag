@@ -34,7 +34,16 @@ if (data.useOptimisticScenario) {
 function sendConversion(data) {
   const goal = data.conversionId;
   const clickId = data.clickId;
-  let baseUrl = 'https://https://tsyndicate.com/api/v1/cpa/action';
+  const advancedParameters = data.parameters;
+  let requestUrl = 'https://tsyndicate.com/api/v1/cpa/action?'+'key='+data.apiKey+'&clickid='+clickId+'&goalid='+goal;
+  
+  if(advancedParameters && advancedParameters.length){
+    advancedParameters.forEach(parameter => {
+      if(parameter.key === 'allow_duplicates' && !!parameter.value) parameter.value = 1;
+      requestUrl += '&'+parameter.key+'='+parameter.value;
+    });
+  }
+  
   const requestOptions = {
     method: "GET"
   };
@@ -107,11 +116,13 @@ function checkGuardClauses(data,eventData) {
   const url = eventData.page_location || getRequestHeader('referer');
 
   if (!isConsentGivenOrNotRequired(data, eventData)) {
-    return data.gtmOnSuccess();
+    data.gtmOnSuccess();
+    return true;
   }
 
   if (url && url.lastIndexOf('https://gtm-msr.appspot.com/', 0) === 0) {
-    return data.gtmOnSuccess();
+    data.gtmOnSuccess();
+    return true;
   }
 }
 
