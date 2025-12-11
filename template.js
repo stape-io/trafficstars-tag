@@ -1,27 +1,32 @@
-const BigQuery = require('BigQuery');
-const encodeUriComponent = require('encodeUriComponent');
-const getAllEventData = require('getAllEventData');
-const getContainerVersion = require('getContainerVersion');
-const getRequestHeader = require('getRequestHeader');
-const getTimestampMillis = require('getTimestampMillis');
-const JSON = require('JSON');
-const logToConsole = require('logToConsole');
-const makeString = require('makeString');
-const makeInteger = require('makeInteger');
-const setCookie = require('setCookie');
-const parseUrl = require('parseUrl');
-const sendHttpRequest = require('sendHttpRequest');
+const BigQuery = require("BigQuery");
+const computeEffectiveTldPlusOne = require("computeEffectiveTldPlusOne");
+const encodeUriComponent = require("encodeUriComponent");
+const getAllEventData = require("getAllEventData");
+const getCookieValues = require("getCookieValues");
+const getContainerVersion = require("getContainerVersion");
+const getEventData = require("getEventData");
+const getRequestHeader = require("getRequestHeader");
+const getTimestampMillis = require("getTimestampMillis");
+const getType = require("getType");
+const JSON = require("JSON");
+const logToConsole = require("logToConsole");
+const makeString = require("makeString");
+const makeInteger = require("makeInteger");
+const setCookie = require("setCookie");
+const parseUrl = require("parseUrl");
+const sendHttpRequest = require("sendHttpRequest");
 
 /*==============================================================================
 ==============================================================================*/
 
 const eventData = getAllEventData();
 
-if(checkGuardClauses(data,eventData)) return;
+if (checkGuardClauses(data, eventData)) return;
 
-if(data.type === 'pageview') return storeClickId(data.clickIdKey);
-
-sendConversion(data);
+if (data.type === "pageview") return storeClickId(data.clickIdKey);
+else {
+  sendConversion(data);
+}
 
 if (data.useOptimisticScenario) {
   return data.gtmOnSuccess();
@@ -35,130 +40,166 @@ function sendConversion(data) {
   const goal = data.conversionId;
   const clickId = data.clickId;
   const advancedParameters = data.parameters;
-  let requestUrl = 'https://tsyndicate.com/api/v1/cpa/action?'+'key='+data.apiKey+'&clickid='+clickId+'&goalid='+goal;
-  
-  if(advancedParameters && advancedParameters.length){
-    advancedParameters.forEach(parameter => {
-      if(parameter.key === 'allow_duplicates' && !!parameter.value) parameter.value = 1;
-      requestUrl += '&'+parameter.key+'='+parameter.value;
+  let requestUrl =
+    "https://tsyndicate.com/api/v1/cpa/action?" +
+    "key=" +
+    enc(data.apiKey) +
+    "&clickid=" +
+    enc(clickId) +
+    "&goalid=" +
+    enc(goal);
+
+  if (advancedParameters && advancedParameters.length) {
+    advancedParameters.forEach((parameter) => {
+      if (parameter.key === "allow_duplicates" && !!parameter.value)
+        parameter.value = 1;
+      requestUrl += "&" + parameter.key + "=" + parameter.value;
     });
   }
-  
+
   const requestOptions = {
-    method: "GET"
+    method: "GET",
   };
-  
+
   log({
-    Name: 'Trafficstars',
-    Type: 'Request',
-    EventName: 'Conversion',
+    Name: "Trafficstars",
+    Type: "Request",
+    EventName: "Conversion",
     RequestMethod: requestOptions.method,
     RequestUrl: requestUrl,
-    RequestBody: ''
   });
-  
+
   return sendHttpRequest(requestUrl, requestOptions)
-  .then(response => {
-       log({
-        Name: 'Trafficstars',
-        Type: 'Response',
-        EventName: 'Conversion',
+    .then((response) => {
+      log({
+        Name: "Trafficstars",
+        Type: "Response",
+        EventName: "Conversion",
         ResponseStatusCode: response.statusCode,
         ResponseHeaders: response.headers,
-        ResponseBody: response.body
-      });  
-    
-    if(response.statusCode !== 200) {
-      return data.gtmOnFailure();
-    }
-    else {
-      return data.gtmOnSuccess();
-    }
-  })
-  .catch(error => {
-       log({
-        Name: 'Trafficstars',
-        Type: 'Message',
-        EventName: 'Conversion',
-        Message: 'API call failed or timed out',
-        Reason: error
+        ResponseBody: response.body,
       });
-    return data.gtmOnFailure();
-  });
+
+      if (response.statusCode !== 200) {
+        return data.gtmOnFailure();
+      } else {
+        return data.gtmOnSuccess();
+      }
+    })
+    .catch((error) => {
+      log({
+        Name: "Trafficstars",
+        Type: "Message",
+        EventName: "Conversion",
+        Message: "API call failed or timed out",
+        Reason: error,
+      });
+      return data.gtmOnFailure();
+    });
 }
 
-function storeClickId(key){  
-  const url = eventData.page_location || getRequestHeader('referer');
+function parseClickIdFromUrl(eventData) {
+  const url = eventData.page_location || getRequestHeader("referer");
+  if (!url) return;
+
   const urlSearchParams = parseUrl(url).searchParams;
-  const clickId = urlSearchParams[data.clickIdKey];
- 
+  return urlSearchParams[data.clickIdParameterName];
+}
+
+function getClickId(data, eventData) {
+  const clickId = data.hasOwnProperty("clickId")
+    ? data.clickId
+    : parseClickIdFromUrl(eventData) || getCookieValues("_trafficstars_cid")[0];
+  return clickId;
+}
+
+function storeClickId(key) {
+  const url = eventData.page_location || getRequestHeader("referer");
   if (!url) return data.gtmOnSuccess();
 
+  const urlSearchParams = parseUrl(url).searchParams;
+  const clickId = getClickId(data, eventData);
+
   const cookieOptions = {
-    domain: data.cookieDomain || 'auto',
-    samesite: 'Lax',
-    path: '/',
+    domain: getCookieDomain(data),
+    samesite: "Lax",
+    path: "/",
     secure: true,
     httpOnly: !!data.cookieHttpOnly,
-    'max-age': 60 * 60 * 24 * (makeInteger(data.cookieExpiration) || 365)
+    "max-age": 60 * 60 * 24 * (makeInteger(data.cookieExpiration) || 365),
   };
 
-  if (clickId) setCookie(data.clickIdKey, clickId, cookieOptions, false);
+  if (clickId) setCookie("_trafficstars_cid", clickId, cookieOptions, false);
 
-  return data.gtmOnSuccess();  
+  return data.gtmOnSuccess();
 }
 
 /*==============================================================================
   Helpers
 ==============================================================================*/
 
-function checkGuardClauses(data,eventData) {
-  const url = eventData.page_location || getRequestHeader('referer');
+function checkGuardClauses(data, eventData) {
+  const url = eventData.page_location || getRequestHeader("referer");
 
   if (!isConsentGivenOrNotRequired(data, eventData)) {
     data.gtmOnSuccess();
     return true;
   }
 
-  if (url && url.lastIndexOf('https://gtm-msr.appspot.com/', 0) === 0) {
+  if (url && url.lastIndexOf("https://gtm-msr.appspot.com/", 0) === 0) {
     data.gtmOnSuccess();
     return true;
   }
 }
 
 function enc(data) {
-  if (data === undefined || data === null) data = '';
+  if (data === undefined || data === null) data = "";
   return encodeUriComponent(makeString(data));
 }
 
+function isValidValue(value) {
+  const valueType = getType(value);
+  return valueType !== "null" && valueType !== "undefined" && value !== "";
+}
+
+function getCookieDomain(data) {
+  return !data.cookieDomain || data.cookieDomain === "auto"
+    ? computeEffectiveTldPlusOne(
+        getEventData("page_location") || getRequestHeader("referer"),
+      ) || "auto"
+    : data.cookieDomain;
+}
+
 function isConsentGivenOrNotRequired(data, eventData) {
-  if (data.adStorageConsent !== 'required') return true;
+  if (data.adStorageConsent !== "required") return true;
   if (eventData.consent_state) return !!eventData.consent_state.ad_storage;
-  const xGaGcs = eventData['x-ga-gcs'] || ''; // x-ga-gcs is a string like "G110"
-  return xGaGcs[2] === '1';
+  const xGaGcs = eventData["x-ga-gcs"] || ""; // x-ga-gcs is a string like "G110"
+  return xGaGcs[2] === "1";
 }
 
 function log(rawDataToLog) {
   const logDestinationsHandlers = {};
-  if (determinateIsLoggingEnabled()) logDestinationsHandlers.console = logConsole;
-  if (determinateIsLoggingEnabledForBigQuery()) logDestinationsHandlers.bigQuery = logToBigQuery;
+  if (determinateIsLoggingEnabled())
+    logDestinationsHandlers.console = logConsole;
+  if (determinateIsLoggingEnabledForBigQuery())
+    logDestinationsHandlers.bigQuery = logToBigQuery;
 
-  rawDataToLog.TraceId = getRequestHeader('trace-id');
+  rawDataToLog.TraceId = getRequestHeader("trace-id");
 
   const keyMappings = {
     // No transformation for Console is needed.
     bigQuery: {
-      Name: 'tag_name',
-      Type: 'type',
-      TraceId: 'trace_id',
-      EventName: 'event_name',
-      RequestMethod: 'request_method',
-      RequestUrl: 'request_url',
-      RequestBody: 'request_body',
-      ResponseStatusCode: 'response_status_code',
-      ResponseHeaders: 'response_headers',
-      ResponseBody: 'response_body'
-    }
+      Name: "tag_name",
+      Type: "type",
+      TraceId: "trace_id",
+      EventName: "event_name",
+      RequestMethod: "request_method",
+      RequestUrl: "request_url",
+      RequestBody: "request_body",
+      ResponseStatusCode: "response_status_code",
+      ResponseHeaders: "response_headers",
+      ResponseBody: "response_body",
+    },
   };
 
   for (const logDestination in logDestinationsHandlers) {
@@ -187,12 +228,12 @@ function logToBigQuery(dataToLog) {
   const connectionInfo = {
     projectId: data.logBigQueryProjectId,
     datasetId: data.logBigQueryDatasetId,
-    tableId: data.logBigQueryTableId
+    tableId: data.logBigQueryTableId,
   };
 
   dataToLog.timestamp = getTimestampMillis();
 
-  ['request_body', 'response_headers', 'response_body'].forEach((p) => {
+  ["request_body", "response_headers", "response_body"].forEach((p) => {
     dataToLog[p] = JSON.stringify(dataToLog[p]);
   });
 
@@ -210,18 +251,18 @@ function determinateIsLoggingEnabled() {
     return isDebug;
   }
 
-  if (data.logType === 'no') {
+  if (data.logType === "no") {
     return false;
   }
 
-  if (data.logType === 'debug') {
+  if (data.logType === "debug") {
     return isDebug;
   }
 
-  return data.logType === 'always';
+  return data.logType === "always";
 }
 
 function determinateIsLoggingEnabledForBigQuery() {
-  if (data.bigQueryLogType === 'no') return false;
-  return data.bigQueryLogType === 'always';
+  if (data.bigQueryLogType === "no") return false;
+  return data.bigQueryLogType === "always";
 }
