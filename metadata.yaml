@@ -1,5 +1,5 @@
-homepage: "https://stape.io/"
-documentation: "https://github.com/stape-io/trafficstars-tag"
+homepage: 'https://stape.io/'
+documentation: 'https://github.com/stape-io/trafficstars-tag'
 versions:
-  - sha: <INITIAL HASH>
+  - sha: 376491cf4ce2082c36db8d4277c78d0994c69fad
     changeNotes: Initial release.
