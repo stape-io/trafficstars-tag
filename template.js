@@ -14,6 +14,7 @@ const makeInteger = require('makeInteger');
 const makeString = require('makeString');
 const parseUrl = require('parseUrl');
 const sendHttpRequest = require('sendHttpRequest');
+const sendPixelFromBrowser = require('sendPixelFromBrowser');
 const setCookie = require('setCookie');
 
 /*==============================================================================
@@ -37,6 +38,7 @@ if (data.useOptimisticScenario) {
 ==============================================================================*/
 
 function sendConversion(data, eventData) {
+  const cookieSync = data.cookieSync;
   const goal = data.conversionId;
   const clickId = getClickId(data, eventData);
   const advancedParameters = data.parameters;
@@ -48,12 +50,38 @@ function sendConversion(data, eventData) {
     enc(clickId) +
     '&goalid=' +
     enc(goal);
+  let conversionParametersForCookieSync = '?goalid=' + enc(goal);
 
-  if (advancedParameters && advancedParameters.length) {
+  if (advancedParameters) {
     advancedParameters.forEach((parameter) => {
       if (parameter.key === 'allow_duplicates' && !!parameter.value) parameter.value = 1;
-      requestUrl += '&' + parameter.key + '=' + parameter.value;
+      const parameterKeyValue = '&' + parameter.key + '=' + enc(parameter.value);
+      requestUrl += parameterKeyValue;
+
+      if (cookieSync && parameter.key !== 'allow_duplicates') {
+        conversionParametersForCookieSync += parameterKeyValue;
+      }
     });
+  }
+
+  if (!clickId) {
+    log({
+      Name: 'TrafficStars',
+      Type: 'Message',
+      EventName: 'Conversion',
+      Message:
+        'No Click ID found. ' +
+        (cookieSync
+          ? '3rd party cookie-syncing requests will try to be sent as fallback.'
+          : 'Aborting.')
+    });
+    if (cookieSync) {
+      return sendCookieSyncPixel(conversionParametersForCookieSync)
+        ? data.gtmOnSuccess()
+        : data.gtmOnFailure();
+    } else {
+      return data.gtmOnFailure();
+    }
   }
 
   const requestOptions = {
@@ -61,7 +89,7 @@ function sendConversion(data, eventData) {
   };
 
   log({
-    Name: 'Trafficstars',
+    Name: 'TrafficStars',
     Type: 'Request',
     EventName: 'Conversion',
     RequestMethod: requestOptions.method,
@@ -71,7 +99,7 @@ function sendConversion(data, eventData) {
   return sendHttpRequest(requestUrl, requestOptions)
     .then((response) => {
       log({
-        Name: 'Trafficstars',
+        Name: 'TrafficStars',
         Type: 'Response',
         EventName: 'Conversion',
         ResponseStatusCode: response.statusCode,
@@ -80,6 +108,26 @@ function sendConversion(data, eventData) {
       });
       if (!data.useOptimisticScenario) {
         if (response.statusCode !== 200) {
+          const parsedBody = JSON.parse(response.body || '{}');
+          if (
+            cookieSync &&
+            getType(parsedBody.error) === 'object' &&
+            (parsedBody.error.msg === 'clickid is empty' ||
+              parsedBody.error.msg === 'getting click error: invalid clickid' ||
+              parsedBody.error.msg === 'clickid is short')
+          ) {
+            log({
+              Name: 'TrafficStars',
+              Type: 'Message',
+              EventName: 'Conversion',
+              Message:
+                'Click ID is invalid. 3rd party cookie-syncing requests will try to be sent as fallback.',
+              Reason: parsedBody
+            });
+            return sendCookieSyncPixel(conversionParametersForCookieSync)
+              ? data.gtmOnSuccess()
+              : data.gtmOnFailure();
+          }
           return data.gtmOnFailure();
         } else {
           return data.gtmOnSuccess();
@@ -88,13 +136,13 @@ function sendConversion(data, eventData) {
     })
     .catch((error) => {
       log({
-        Name: 'Trafficstars',
+        Name: 'TrafficStars',
         Type: 'Message',
         EventName: 'Conversion',
         Message: 'API call failed or timed out',
         Reason: JSON.stringify(error)
       });
-      return data.gtmOnFailure();
+      if (!data.useOptimisticScenario) return data.gtmOnFailure();
     });
 }
 
@@ -114,24 +162,41 @@ function getClickId(data, eventData) {
 }
 
 function storeClickId(data, eventData) {
-  const url = eventData.page_location || getRequestHeader('referer');
-
-  if (!url) return data.gtmOnSuccess();
-
-  const clickId = getClickId(data, eventData);
-
-  const cookieOptions = {
-    domain: getCookieDomain(data),
-    samesite: data.cookieSameSite || 'none',
-    path: '/',
-    secure: true,
-    httpOnly: !!data.cookieHttpOnly,
-    'max-age': 60 * 60 * 24 * (makeInteger(data.cookieExpiration) || 365)
-  };
-
-  if (clickId) setCookie('_trafficstars_cid', clickId, cookieOptions, false);
+  const clickId = parseClickIdFromUrl(data, eventData);
+  if (clickId) {
+    const cookieOptions = {
+      domain: getCookieDomain(data),
+      samesite: data.cookieSameSite || 'none',
+      path: '/',
+      secure: true,
+      httpOnly: !!data.cookieHttpOnly,
+      'max-age': 60 * 60 * 24 * (makeInteger(data.cookieExpiration) || 365)
+    };
+    setCookie('_trafficstars_cid', clickId, cookieOptions, false);
+  }
 
   return data.gtmOnSuccess();
+}
+
+function sendCookieSyncPixel(conversionParametersForCookieSync) {
+  const url =
+    'https://tsyndicate.com/api/v2/cpa/' +
+    enc(data.profileId) +
+    '/pixel.gif' +
+    conversionParametersForCookieSync;
+  const sendPixelFromBrowserSuccess = sendPixelFromBrowser(url);
+
+  if (!sendPixelFromBrowserSuccess) {
+    log({
+      Name: 'TrafficStars',
+      Type: 'Message',
+      EventName: 'Conversion',
+      Message:
+        'The requestor does not support sending pixels from browser. 3rd party cookies will not be collected as a result.'
+    });
+  }
+
+  return sendPixelFromBrowserSuccess;
 }
 
 /*==============================================================================
@@ -153,13 +218,8 @@ function checkGuardClauses(data, eventData) {
 }
 
 function enc(data) {
-  if (data === undefined || data === null) data = '';
+  if (['null', 'undefined'].indexOf(getType(data)) !== -1) data = '';
   return encodeUriComponent(makeString(data));
-}
-
-function isValidValue(value) {
-  const valueType = getType(value);
-  return valueType !== 'null' && valueType !== 'undefined' && value !== '';
 }
 
 function getCookieDomain(data) {
