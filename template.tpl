@@ -131,6 +131,27 @@ ___TEMPLATE_PARAMETERS___
             ],
             "simpleValueType": true,
             "defaultValue": false
+          },
+          {
+            "type": "SELECT",
+            "name": "cookieSameSite",
+            "displayName": "Same Site Flag",
+            "macrosInSelect": true,
+            "selectItems": [
+              {
+                "value": "none",
+                "displayValue": "None"
+              },
+              {
+                "value": "lax",
+                "displayValue": "Lax"
+              },
+              {
+                "value": "strict",
+                "displayValue": "Strict"
+              }
+            ],
+            "simpleValueType": true
           }
         ],
         "enablingConditions": [
@@ -418,9 +439,9 @@ const eventData = getAllEventData();
 
 if (checkGuardClauses(data, eventData)) return;
 
-if (data.type === 'pageview') return storeClickId(data.clickIdKey);
+if (data.type === 'pageview') return storeClickId(data, eventData);
 else {
-  sendConversion(data);
+  sendConversion(data, eventData);
 }
 
 if (data.useOptimisticScenario) {
@@ -431,9 +452,9 @@ if (data.useOptimisticScenario) {
   Vendor related functions
 ==============================================================================*/
 
-function sendConversion(data) {
+function sendConversion(data, eventData) {
   const goal = data.conversionId;
-  const clickId = data.clickId;
+  const clickId = getClickId(data, eventData);
   const advancedParameters = data.parameters;
   let requestUrl =
     'https://tsyndicate.com/api/v1/cpa/action?' +
@@ -487,13 +508,13 @@ function sendConversion(data) {
         Type: 'Message',
         EventName: 'Conversion',
         Message: 'API call failed or timed out',
-        Reason: error
+        Reason: JSON.stringify(error)
       });
       return data.gtmOnFailure();
     });
 }
 
-function parseClickIdFromUrl(eventData) {
+function parseClickIdFromUrl(data, eventData) {
   const url = eventData.page_location || getRequestHeader('referer');
   if (!url) return;
 
@@ -504,11 +525,11 @@ function parseClickIdFromUrl(eventData) {
 function getClickId(data, eventData) {
   const clickId = data.hasOwnProperty('clickId')
     ? data.clickId
-    : parseClickIdFromUrl(eventData) || getCookieValues('_trafficstars_cid')[0];
+    : parseClickIdFromUrl(data, eventData) || getCookieValues('_trafficstars_cid')[0];
   return clickId;
 }
 
-function storeClickId() {
+function storeClickId(data, eventData) {
   const url = eventData.page_location || getRequestHeader('referer');
 
   if (!url) return data.gtmOnSuccess();
@@ -517,7 +538,7 @@ function storeClickId() {
 
   const cookieOptions = {
     domain: getCookieDomain(data),
-    samesite: 'Lax',
+    samesite: data.cookieSameSite || 'none',
     path: '/',
     secure: true,
     httpOnly: !!data.cookieHttpOnly,
