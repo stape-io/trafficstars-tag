@@ -48,3 +48,6 @@ Use the table to map specific fields supported by the TrafficStars API:
 ## Open Source
 
 The **TrafficStars Tag for GTM Server Side** is developed and maintained by the [Stape Team](https://stape.io/) under the Apache 2.0 license.
+
+### GTM Gallery Status
+🟢 [Listed](https://tagmanager.google.com/gallery/#/owners/stape-io/templates/trafficstars-tag)
