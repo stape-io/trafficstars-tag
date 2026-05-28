@@ -1,12 +1,9 @@
-const BigQuery = require('BigQuery');
 const computeEffectiveTldPlusOne = require('computeEffectiveTldPlusOne');
 const encodeUriComponent = require('encodeUriComponent');
 const getAllEventData = require('getAllEventData');
 const getCookieValues = require('getCookieValues');
-const getContainerVersion = require('getContainerVersion');
 const getEventData = require('getEventData');
 const getRequestHeader = require('getRequestHeader');
-const getTimestampMillis = require('getTimestampMillis');
 const getType = require('getType');
 const JSON = require('JSON');
 const logToConsole = require('logToConsole');
@@ -70,7 +67,7 @@ function sendConversion(data, eventData) {
       Type: 'Message',
       EventName: 'Conversion',
       Message:
-        'No Click ID found. ' +
+        '⚠️ [WARNING] No Click ID found. ' +
         (cookieSync
           ? '3rd party cookie-syncing requests will try to be sent as fallback.'
           : 'Aborting.')
@@ -88,24 +85,8 @@ function sendConversion(data, eventData) {
     method: 'GET'
   };
 
-  log({
-    Name: 'TrafficStars',
-    Type: 'Request',
-    EventName: 'Conversion',
-    RequestMethod: requestOptions.method,
-    RequestUrl: requestUrl
-  });
-
   return sendHttpRequest(requestUrl, requestOptions)
     .then((response) => {
-      log({
-        Name: 'TrafficStars',
-        Type: 'Response',
-        EventName: 'Conversion',
-        ResponseStatusCode: response.statusCode,
-        ResponseHeaders: response.headers,
-        ResponseBody: response.body
-      });
       if (!data.useOptimisticScenario) {
         if (response.statusCode !== 200) {
           const parsedBody = JSON.parse(response.body || '{}');
@@ -121,7 +102,7 @@ function sendConversion(data, eventData) {
               Type: 'Message',
               EventName: 'Conversion',
               Message:
-                'Click ID is invalid. 3rd party cookie-syncing requests will try to be sent as fallback.',
+                '⚠️ [WARNING] Click ID is invalid. 3rd party cookie-syncing requests will try to be sent as fallback.',
               Reason: parsedBody
             });
             return sendCookieSyncPixel(conversionParametersForCookieSync)
@@ -135,13 +116,6 @@ function sendConversion(data, eventData) {
       }
     })
     .catch((error) => {
-      log({
-        Name: 'TrafficStars',
-        Type: 'Message',
-        EventName: 'Conversion',
-        Message: 'API call failed or timed out',
-        Reason: JSON.stringify(error)
-      });
       if (!data.useOptimisticScenario) return data.gtmOnFailure();
     });
 }
@@ -192,7 +166,7 @@ function sendCookieSyncPixel(conversionParametersForCookieSync) {
       Type: 'Message',
       EventName: 'Conversion',
       Message:
-        'The requestor does not support sending pixels from browser. 3rd party cookies will not be collected as a result.'
+        '⚠️ [WARNING] The requestor does not support sending pixels from browser. 3rd party cookies will not be collected as a result.'
     });
   }
 
@@ -237,89 +211,6 @@ function isConsentGivenOrNotRequired(data, eventData) {
 }
 
 function log(rawDataToLog) {
-  const logDestinationsHandlers = {};
-  if (determinateIsLoggingEnabled()) logDestinationsHandlers.console = logConsole;
-  if (determinateIsLoggingEnabledForBigQuery()) logDestinationsHandlers.bigQuery = logToBigQuery;
-
   rawDataToLog.TraceId = getRequestHeader('trace-id');
-
-  const keyMappings = {
-    // No transformation for Console is needed.
-    bigQuery: {
-      Name: 'tag_name',
-      Type: 'type',
-      TraceId: 'trace_id',
-      EventName: 'event_name',
-      RequestMethod: 'request_method',
-      RequestUrl: 'request_url',
-      RequestBody: 'request_body',
-      ResponseStatusCode: 'response_status_code',
-      ResponseHeaders: 'response_headers',
-      ResponseBody: 'response_body'
-    }
-  };
-
-  for (const logDestination in logDestinationsHandlers) {
-    const handler = logDestinationsHandlers[logDestination];
-    if (!handler) continue;
-
-    const mapping = keyMappings[logDestination];
-    const dataToLog = mapping ? {} : rawDataToLog;
-
-    if (mapping) {
-      for (const key in rawDataToLog) {
-        const mappedKey = mapping[key] || key;
-        dataToLog[mappedKey] = rawDataToLog[key];
-      }
-    }
-
-    handler(dataToLog);
-  }
-}
-
-function logConsole(dataToLog) {
-  logToConsole(JSON.stringify(dataToLog));
-}
-
-function logToBigQuery(dataToLog) {
-  const connectionInfo = {
-    projectId: data.logBigQueryProjectId,
-    datasetId: data.logBigQueryDatasetId,
-    tableId: data.logBigQueryTableId
-  };
-
-  dataToLog.timestamp = getTimestampMillis();
-
-  ['request_body', 'response_headers', 'response_body'].forEach((p) => {
-    dataToLog[p] = JSON.stringify(dataToLog[p]);
-  });
-
-  BigQuery.insert(connectionInfo, [dataToLog], { ignoreUnknownValues: true });
-}
-
-function determinateIsLoggingEnabled() {
-  const containerVersion = getContainerVersion();
-  const isDebug = !!(
-    containerVersion &&
-    (containerVersion.debugMode || containerVersion.previewMode)
-  );
-
-  if (!data.logType) {
-    return isDebug;
-  }
-
-  if (data.logType === 'no') {
-    return false;
-  }
-
-  if (data.logType === 'debug') {
-    return isDebug;
-  }
-
-  return data.logType === 'always';
-}
-
-function determinateIsLoggingEnabledForBigQuery() {
-  if (data.bigQueryLogType === 'no') return false;
-  return data.bigQueryLogType === 'always';
+  logToConsole(JSON.stringify(rawDataToLog));
 }
