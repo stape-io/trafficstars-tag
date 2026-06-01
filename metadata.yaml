@@ -1,5 +1,7 @@
 homepage: 'https://stape.io/'
 documentation: 'https://github.com/stape-io/trafficstars-tag'
 versions:
+  - sha: 994969fc0b0d9f695f3f6574fe25ffffdeb39560
+    changeNotes: Logging removal.
   - sha: 376491cf4ce2082c36db8d4277c78d0994c69fad
     changeNotes: Initial release.
